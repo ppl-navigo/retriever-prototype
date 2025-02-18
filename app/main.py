@@ -6,6 +6,11 @@ from .model import embedding_model, rerank_model
 from .database import get_db
 from dotenv import load_dotenv
 from flashrank import RerankRequest
+import os
+os.environ['HTTP_PROXY'] = 'http://proxy.cs.ui.ac.id:8080'
+os.environ['http_proxy'] = 'http://proxy.cs.ui.ac.id:8080'
+os.environ['HTTPS_PROXY'] = 'http://proxy.cs.ui.ac.id:8080'
+os.environ['https_proxy'] = 'http://proxy.cs.ui.ac.id:8080'
 
 app = FastAPI()
 
