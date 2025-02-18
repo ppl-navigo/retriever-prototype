@@ -3,3 +3,4 @@ SQLAlchemy
 python-dotenv
 flashrank
 sentence-transformers
+psycopg-binary
