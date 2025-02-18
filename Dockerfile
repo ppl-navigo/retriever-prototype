@@ -12,9 +12,9 @@ RUN apt-get install -y \
   libpq-dev \
   libmariadb-dev-compat \
   libmariadb-dev \
+  python3-psycopg2 \
   gcc \
   && apt-get clean
-
 
 # Install any needed packages specified in requirements.txt
 RUN python3 -m pip install --no-cache-dir -r requirements.txt
