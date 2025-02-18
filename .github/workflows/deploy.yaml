@@ -1,0 +1,43 @@
+name: Deploying to Production
+
+on:
+  push:
+    branches:
+      - main
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v2
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v1
+        with:
+          username: ${{ secrets.DOCKER_HUB_USERNAME }}
+          password: ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v2
+        with:
+          push: true
+          tags: ${{ secrets.DOCKER_HUB_USERNAME }}/chat:retrieval
+
+      - name: Releasing New Version
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SSH_HOST_IP }}
+          username: ${{ secrets.SSH_HOST_USER }}
+          password: ${{ secrets.SSH_HOST_PASS }}
+          port: ${{ secrets.SSH_PORT }}
+          proxy_host: ${{ secrets.SSH_JUMP_HOST_URL }}
+          proxy_username: ${{ secrets.SSH_JUMP_HOST_USER }}
+          proxy_key: ${{ secrets.SSH_JUMP_HOST_KEY }}
+          proxy_port: ${{ secrets.SSH_JUMP_HOST_PORT }}
+          proxy_passphrase: ${{ secrets.SSH_JUMP_HOST_PASSPHRASE }}
+          script: |
+            docker login -u ${{ secrets.DOCKER_HUB_USERNAME }} -p ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }}
+            docker pull ${{ secrets.DOCKER_HUB_USERNAME }}/chat:retrieval
+            source .env
+            docker compose up -d

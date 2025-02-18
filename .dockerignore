@@ -1,0 +1,5 @@
+all_links.pkl
+all_metadata.pkl
+.cache
+title_embed
+venv

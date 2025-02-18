@@ -1,0 +1,5 @@
+fastapi[standard]
+SQLAlchemy
+python-dotenv
+flashrank
+sentence-transformers

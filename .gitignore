@@ -1,0 +1,9 @@
+title_embed
+venv
+.cache
+all_links.pkl
+all_metadata.pkl
+load_db.ipynb
+load_db.py
+.env
+__pycache__
