@@ -2,7 +2,7 @@ services:
   retriever:
     image: lexincsui/chat:retrieval
     ports:
-      - "5000:5000"
+      - "5000:80"
     environment:
       - DATABASE_URL: ${DATABASE_URL}
       - GEMINI_API_KEY: ${GEMINI_API_KEY}
