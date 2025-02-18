@@ -17,9 +17,7 @@ RUN apt-get install -y \
 
 
 # Install any needed packages specified in requirements.txt
-RUN pip install --no-cache-dir -r requirements.txt
-RUN python -c 'from sentence_transformers import SentenceTransformer; embedding_model = SentenceTransformer("intfloat/multilingual-e5-large-instruct")'
-RUN python -c 'from flashrank import Ranker; rerank_model = Ranker(model_name="ms-marco-TinyBERT-L-2-v2", cache_dir="./.cache", max_length=2000)'
+RUN python3 -m pip install --no-cache-dir -r requirements.txt
 # Make port 80 available to the world outside this container
 EXPOSE 80
 
