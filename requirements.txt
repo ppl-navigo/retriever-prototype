@@ -4,3 +4,4 @@ python-dotenv
 flashrank
 sentence-transformers
 psycopg2-binary
+psycopg2
