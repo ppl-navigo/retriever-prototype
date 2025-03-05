@@ -164,9 +164,9 @@ def retrieval_generator(vsm_query: str, fts_query: str, berlaku_only: bool, tida
     payload = []
     ids = set()
     for doc in docs:
-        if doc["document_id"] not in ids:
+        if (doc["document_id"], doc["page_number"]) not in ids:
             payload.append(doc)
-            ids.add(doc["document_id"])
+            ids.add((doc["document_id"], doc["page_number"]))
 
     yield f"done;Selesai mengumpulkan informasi, {len(docs)} dokumen relevan ditemukan;{json.dumps(payload, default=str)}\n"
     yield "data: done\n\n"
