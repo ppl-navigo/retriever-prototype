@@ -1,88 +1,177 @@
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
-from sqlalchemy import text, CursorResult
+from sqlalchemy import text, CursorResult, bindparam
 from pydantic import BaseModel
-from .model import embedding_model, rerank_model
+from flashrank import Ranker
 from .database import get_db
-from dotenv import load_dotenv
 from flashrank import RerankRequest
+import ollama
 import os
-os.environ['HTTP_PROXY'] = 'http://proxy.cs.ui.ac.id:8080'
-os.environ['http_proxy'] = 'http://proxy.cs.ui.ac.id:8080'
+import json
+
 os.environ['HTTPS_PROXY'] = 'http://proxy.cs.ui.ac.id:8080'
 os.environ['https_proxy'] = 'http://proxy.cs.ui.ac.id:8080'
 
 app = FastAPI()
+rerank_model = Ranker(model_name="ms-marco-TinyBERT-L-2-v2", cache_dir="./.cache", max_length=2000)
 
 class Search(BaseModel):
-    query: str
-    history: list[str]
+    vsm_query: str
+    fts_query: str
+    berlaku_only: bool
+    tidak_berlaku_only: bool
+
 
 @app.get("/")
 def health_check():
     return {"Status": "Healthy"}
 
-@app.post("/query")
-def search(search: Search, db: Session = Depends(get_db)):
-    query = f"""
-    Anda adalah sebuah search engine undang-undang yang menerima query berikut:
-    === BEGIN QUERY ===
-    {search.query}
-    === END QUERY ===
-    {"Selain itu, Anda juga menerima history query berikut:\n" + "\n".join(search.history) if search.history else ""}
-    Carilah dokumen yang paling relevan dengan query tersebut.
-    """
-
-    embedding_vector = embedding_model.encode(query)
-    res: CursorResult = db.execute(text("""--sql
-        SELECT chunk.body, chunk.page_number, chunk.last_modified,
-        doc.title, doc.jenis_bentuk_peraturan, doc.pemrakarsa,
-        doc.nomor, doc.tahun, doc.tentang, doc.tempat_penetapan,
-        doc.ditetapkan_tanggal, doc.pejabat_yang_menetapkan, doc.url,
-        1 - (chunk.embedding <=> CAST(:query_embedding AS vector)) as similarity,
-        doc.id, doc.status, chunk.id
-        FROM legal_document_chunks AS chunk
-        JOIN legal_documents AS doc ON doc.id = chunk.legal_document_id
-        -- WHERE CAST(:query_embedding AS vector) <=> chunk.embedding > 0.7
-        ORDER BY similarity DESC
-        LIMIT 100;
-    """), params={"query_embedding": embedding_vector.tolist()})
+def retrieval_generator(vsm_query: str, fts_query: str, berlaku_only: bool, tidak_berlaku_only: bool, db: Session):
+    status_select = ""
+    if berlaku_only:
+        status_select = "Tidak Berlaku"
+    elif tidak_berlaku_only:
+        status_select = "Berlaku"
+    else:
+        status_select = "Semua"
+    embedding_vector = ollama.embed(model="bge-m3", input=vsm_query).embeddings[0]
+    yield "0;Selesai memahami query, sedang mencari informasi relevan...;null\n"
+    res: CursorResult = db.execute(text("""
+    SELECT 
+        doc.title,
+        chunk.page_number,
+        string_agg(chunk.body, ' ' ORDER BY chunk.id) AS aggregated_body,
+        max(1 - (chunk.embedding <=> CAST(:query_embedding AS vector))) AS similarity,
+        chunk.legal_document_id AS doc_id
+    FROM legal_document_chunks AS chunk
+    JOIN legal_documents AS doc ON doc.id = chunk.legal_document_id
+    WHERE doc.status <> :status_select
+    GROUP BY doc.title, chunk.page_number, chunk.legal_document_id
+    ORDER BY similarity DESC
+    LIMIT 100;
+    """), params={"query_embedding": embedding_vector, "status_select": status_select})
 
     data = []
     rows = res.fetchall()
     for i, row in enumerate(rows):
         data.append({
-            "id": i+1,
-            "text": row[0],
+            "id": i + 1,
+            "doc_title": row[0],
             "page_number": row[1],
-            "doc_title": row[3],
-            "source": row[12],
-            "similiarity": row[13],
-            "metadata": {
-                "doc_id": row[14],
-                "last_modified": row[2],
-                "type": row[4],
-                "initiator": row[5],
-                "number": row[6],
-                "year": row[7],
-                "about": row[8],
-                "place_of_establisment": row[9],
-                "date_of_establishment": row[10],
-                "official_of_establishment": row[11],
-                "status": row[15],
-                "chunk_id": row[16],
-            },
+            "text": row[2],
+            "similarity": row[3],
+            "doc_id": row[4]
+        })
+    yield f"1;Selesai menemukan dokumen yang cocok, sedang mengurutkan relevansi dokumen...;null\n"
+
+    rerank_request = RerankRequest(query=vsm_query, passages=data)
+    result = rerank_model.rerank(rerank_request)[:20]
+
+    selected_item = [(r["doc_id"], r["page_number"]) for r in result]
+    yield f"2;Selesai mengumpulkan dokumen, lanjut mencari tambahan informasi...;null\n"
+    docs = []
+    for id, page_number in selected_item:
+        res = db.execute(text("""
+            SELECT * FROM public.legal_document_page_metadata_view
+            WHERE document_id = :id
+            AND page_number BETWEEN :min_page AND :max_page
+            AND status <> :status_select
+        """), params={
+            "id": id,
+            "min_page": page_number - 2,
+            "max_page": page_number + 2,
+            "status_select": status_select
         })
 
-    print(data)
+        for doc in res:
+            docs.append({
+                "document_id": doc[0],
+                "title": doc[1],
+                "jenis_bentuk_peraturan": doc[2],
+                "pemrakarsa": doc[3],
+                "nomor": doc[4],
+                "tahun": doc[5],
+                "tentang": doc[6],
+                "tempat_penetapan": doc[7],
+                "ditetapkan_tanggal": doc[8],
+                "pejabat_yang_menetapkan": doc[9],
+                "status": doc[10],
+                "url": doc[11],
+                "dasar_hukum": doc[12],
+                "mengubah": doc[13],
+                "diubah_oleh": doc[14],
+                "mencabut": doc[15],
+                "dicabut_oleh": doc[16],
+                "melaksanakan_amanat_peraturan": doc[17],
+                "dilaksanakan_oleh_peraturan_pelaksana": doc[18],
+                "page_number": doc[19],
+                "combined_body": doc[20],
+            })
 
-    rerank_request = RerankRequest(query=query, passages=data)
-    if len(data) == 0:
-        return []
+    yield f"3;{len(docs)} dokumen relevan berhasil dikumpulkan, sedang mencari dokumen yang memuat kata kunci;null\n"
+    ts_lang = 'indonesian'
+    stmt = text("""
+        SELECT document_id, page_number,
+        ts_rank_cd(full_text_search, to_tsquery(:lang, :ts_query)) AS rank
+        FROM legal_document_pages
+        WHERE full_text_search @@ to_tsquery(:lang, :ts_query) AND status <> :status_select
+        ORDER BY rank DESC
+        LIMIT 10
+    """)
 
-    result = rerank_model.rerank(rerank_request)[:20]
-    for i, r in enumerate(result):
-        r["id"] = i+1
-        r["score"] = r["score"].item()
-    
-    return result
+    res = db.execute(stmt, params={"lang": ts_lang, "ts_query": fts_query, "status_select": status_select})
+    for id, page_number, _ in res:
+        res = db.execute(text("""
+            SELECT * FROM public.legal_document_page_metadata_view
+            WHERE document_id = :id
+            AND page_number BETWEEN :min_page AND :max_page
+            AND status <> :status_select
+        """), params={
+            "id": id,
+            "min_page": page_number - 2,
+            "max_page": page_number + 2,
+            "status_select": status_select
+        })
+
+        for doc in res:
+            docs.append({
+                "document_id": doc[0],
+                "title": doc[1],
+                "jenis_bentuk_peraturan": doc[2],
+                "pemrakarsa": doc[3],
+                "nomor": doc[4],
+                "tahun": doc[5],
+                "tentang": doc[6],
+                "tempat_penetapan": doc[7],
+                "ditetapkan_tanggal": doc[8],
+                "pejabat_yang_menetapkan": doc[9],
+                "status": doc[10],
+                "url": doc[11],
+                "dasar_hukum": doc[12],
+                "mengubah": doc[13],
+                "diubah_oleh": doc[14],
+                "mencabut": doc[15],
+                "dicabut_oleh": doc[16],
+                "melaksanakan_amanat_peraturan": doc[17],
+                "dilaksanakan_oleh_peraturan_pelaksana": doc[18],
+                "page_number": doc[19],
+                "combined_body": doc[20],
+            })
+
+    yield f"4;{len(docs)} dokumen relevan berhasil dikumpulkan, memilah dokumen redundan...;null\n"
+    # deduplicate based on document_id
+    payload = []
+    ids = set()
+    for doc in docs:
+        if doc["document_id"] not in ids:
+            payload.append(doc)
+            ids.add(doc["document_id"])
+
+    yield f"done;Selesai mengumpulkan informasi, {len(docs)} dokumen relevan ditemukan;{json.dumps(payload, default=str)}\n"
+    yield "data: done\n\n"
+    db.close()
+
+@app.post("/query")
+def search(search: Search, db: Session = Depends(get_db)):
+    return StreamingResponse(retrieval_generator(search.vsm_query, search.fts_query, search.berlaku_only, search.tidak_berlaku_only, db), media_type="text/event-stream")
