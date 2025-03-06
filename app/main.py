@@ -16,7 +16,7 @@ os.environ['https_proxy'] = ''
 os.environ['http_proxy'] = ''
 
 client = Client(
-  host='http://ollama:11434',
+  host='http://localhost:11434',
   headers={'x-some-header': 'some-value'}
 )
 
@@ -64,40 +64,27 @@ def retrieval_generator(vsm_query: str, fts_query: str, berlaku_only: bool, tida
     else:
         status_select = "Semua"
     embedding_vector = client.embed(model="bge-m3", input=vsm_query).embeddings[0]
-    print(f"Query: {vsm_query}")
-    print(f"Embedding: {embedding_vector}")
     yield "0;Selesai memahami query, sedang mencari informasi relevan...;null\n"
     res: CursorResult = db.execute(text("""
-    SELECT 
-        doc.title,
-        chunk.page_number,
-        string_agg(chunk.body, ' ' ORDER BY chunk.id) AS aggregated_body,
-        max(1 - (chunk.embedding <=> CAST(:query_embedding AS vector))) AS similarity,
-        chunk.legal_document_id AS doc_id
+    SELECT DISTINCT chunk.page_number, chunk.legal_document_id,
+    MAX((1 - (chunk.embedding <=> CAST(:query_embedding AS vector)))) AS similarity
     FROM legal_document_chunks AS chunk
     JOIN legal_documents AS doc ON doc.id = chunk.legal_document_id
     WHERE doc.status <> :status_select
-    GROUP BY doc.title, chunk.page_number, chunk.legal_document_id
+    GROUP BY chunk.page_number, chunk.legal_document_id
     ORDER BY similarity DESC
-    LIMIT 100;
+    LIMIT 20;
     """), params={"query_embedding": embedding_vector, "status_select": status_select})
     data = []
     rows = res.fetchall()
     for i, row in enumerate(rows):
         data.append({
             "id": i + 1,
-            "doc_title": row[0],
-            "page_number": row[1],
-            "text": row[2],
-            "similarity": row[3],
-            "doc_id": row[4]
+            "page_number": row[0],
+            "doc_id": row[1]
         })
     yield f"1;Selesai menemukan informasi yang cocok, sedang mengurutkan relevansi informasi...;null\n"
-    print(f"Data: {len(data)}")
-    rerank_request = RerankRequest(query=vsm_query, passages=data)
-    result = rerank_model.rerank(rerank_request)[:20]
-
-    selected_item = [(r["doc_id"], r["page_number"]) for r in result]
+    selected_item = [(r["doc_id"], r["page_number"]) for r in data]
     yield f"2;Selesai mengumpulkan informasi, lanjut mencari tambahan informasi...;null\n"
     docs = []
     for id, page_number in selected_item:
@@ -142,12 +129,12 @@ def retrieval_generator(vsm_query: str, fts_query: str, berlaku_only: bool, tida
     try:
         ts_lang = 'indonesian'
         stmt = text("""
-            SELECT document_id, page_number,
-            ts_rank_cd(full_text_search, to_tsquery(:lang, :ts_query)) AS rank
+            SELECT DISTINCT document_id, page_number, MAX(ts_rank_cd(full_text_search, to_tsquery(:lang, :ts_query))) AS rank
             FROM legal_document_pages
             WHERE full_text_search @@ to_tsquery(:lang, :ts_query) AND status <> :status_select
+            GROUP BY document_id, page_number
             ORDER BY rank DESC
-            LIMIT 10
+            LIMIT 20;
         """)
 
 
@@ -191,7 +178,6 @@ def retrieval_generator(vsm_query: str, fts_query: str, berlaku_only: bool, tida
                 })
     except Exception as e:
         print(e)
-    print(f"Data: {len(docs)}")
     yield f"4;{len(docs)} informasi relevan berhasil dikumpulkan, mengurutkan informasi berdasarkan relevansi...;null\n"
     # deduplicate based on document_id
     payload = []
@@ -201,7 +187,6 @@ def retrieval_generator(vsm_query: str, fts_query: str, berlaku_only: bool, tida
             payload.append(doc)
             ids.add((doc["document_id"], doc["page_number"]))
 
-    # rerank docs
     rerank_request = RerankRequest(query=vsm_query, passages=[
         {
             "id": i,
@@ -212,7 +197,6 @@ def retrieval_generator(vsm_query: str, fts_query: str, berlaku_only: bool, tida
     result = rerank_model.rerank(rerank_request)
 
     yield f"done;Selesai mengumpulkan informasi, {len(docs)} informasi relevan ditemukan;{json.dumps(result, default=str)}\n"
-    print("done")
     yield "data: done\n\n"
     db.close()
 
