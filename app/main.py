@@ -6,12 +6,19 @@ from pydantic import BaseModel
 from flashrank import Ranker
 from .database import get_db
 from flashrank import RerankRequest
-import ollama
+from ollama import Client
 import os
 import json
 
-# os.environ['HTTPS_PROXY'] = 'http://proxy.cs.ui.ac.id:8080'
-# os.environ['https_proxy'] = 'http://proxy.cs.ui.ac.id:8080'
+os.environ['HTTPS_PROXY'] = ''
+os.environ['HTTP_PROXY'] = ''
+os.environ['https_proxy'] = ''
+os.environ['http_proxy'] = ''
+
+client = Client(
+  host='http://ollama:11434',
+  headers={'x-some-header': 'some-value'}
+)
 
 app = FastAPI()
 rerank_model = Ranker(model_name="ms-marco-TinyBERT-L-2-v2", cache_dir="./.cache", max_length=2000)
@@ -56,7 +63,7 @@ def retrieval_generator(vsm_query: str, fts_query: str, berlaku_only: bool, tida
         status_select = "Berlaku"
     else:
         status_select = "Semua"
-    embedding_vector = ollama.embed(model="bge-m3", input=vsm_query).embeddings[0]
+    embedding_vector = client.embed(model="bge-m3", input=vsm_query).embeddings[0]
     yield "0;Selesai memahami query, sedang mencari informasi relevan...;null\n"
     res: CursorResult = db.execute(text("""
     SELECT 
