@@ -27,6 +27,27 @@ class Search(BaseModel):
 def health_check():
     return {"Status": "Healthy"}
 
+class Feedback(BaseModel):
+    metadata: str
+
+@app.post("/like")
+def like(feedback: Feedback, db: Session = Depends(get_db)):
+    db.execute(text("""
+        INSERT INTO feedback_like (metadata) VALUES (:metadata)
+    """), params={"metadata": feedback.metadata})
+    db.commit()
+    db.close()
+    return {"status": "ok"}
+
+@app.post("/dislike")
+def dislike(feedback: Feedback, db: Session = Depends(get_db)):
+    db.execute(text("""
+        INSERT INTO feedback_dislike (metadata) VALUES (:metadata)
+    """), params={"metadata": feedback.metadata})
+    db.commit()
+    db.close()
+    return {"status": "ok"}
+
 def retrieval_generator(vsm_query: str, fts_query: str, berlaku_only: bool, tidak_berlaku_only: bool, db: Session):
     status_select = ""
     if berlaku_only:
@@ -63,13 +84,13 @@ def retrieval_generator(vsm_query: str, fts_query: str, berlaku_only: bool, tida
             "similarity": row[3],
             "doc_id": row[4]
         })
-    yield f"1;Selesai menemukan dokumen yang cocok, sedang mengurutkan relevansi dokumen...;null\n"
+    yield f"1;Selesai menemukan informasi yang cocok, sedang mengurutkan relevansi informasi...;null\n"
 
     rerank_request = RerankRequest(query=vsm_query, passages=data)
     result = rerank_model.rerank(rerank_request)[:20]
 
     selected_item = [(r["doc_id"], r["page_number"]) for r in result]
-    yield f"2;Selesai mengumpulkan dokumen, lanjut mencari tambahan informasi...;null\n"
+    yield f"2;Selesai mengumpulkan informasi, lanjut mencari tambahan informasi...;null\n"
     docs = []
     for id, page_number in selected_item:
         res = db.execute(text("""
@@ -159,7 +180,7 @@ def retrieval_generator(vsm_query: str, fts_query: str, berlaku_only: bool, tida
                 "combined_body": doc[20],
             })
 
-    yield f"4;{len(docs)} dokumen relevan berhasil dikumpulkan, memilah dokumen redundan...;null\n"
+    yield f"4;{len(docs)} informasi relevan berhasil dikumpulkan, mengurutkan informasi berdasarkan relevansi...;null\n"
     # deduplicate based on document_id
     payload = []
     ids = set()
@@ -168,7 +189,17 @@ def retrieval_generator(vsm_query: str, fts_query: str, berlaku_only: bool, tida
             payload.append(doc)
             ids.add((doc["document_id"], doc["page_number"]))
 
-    yield f"done;Selesai mengumpulkan informasi, {len(docs)} dokumen relevan ditemukan;{json.dumps(payload, default=str)}\n"
+    # rerank docs
+    rerank_request = RerankRequest(query=vsm_query, passages=[
+        {
+            "id": i,
+            "text": doc["combined_body"],
+            **doc
+        } for i, doc in enumerate(payload)
+    ])
+    result = rerank_model.rerank(rerank_request)
+
+    yield f"done;Selesai mengumpulkan informasi, {len(docs)} informasi relevan ditemukan;{json.dumps(result, default=str)}\n"
     yield "data: done\n\n"
     db.close()
 
