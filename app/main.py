@@ -130,55 +130,59 @@ def retrieval_generator(vsm_query: str, fts_query: str, berlaku_only: bool, tida
                 "combined_body": doc[20],
             })
 
-    yield f"3;{len(docs)} dokumen relevan berhasil dikumpulkan, sedang mencari dokumen yang memuat kata kunci;null\n"
-    ts_lang = 'indonesian'
-    stmt = text("""
-        SELECT document_id, page_number,
-        ts_rank_cd(full_text_search, to_tsquery(:lang, :ts_query)) AS rank
-        FROM legal_document_pages
-        WHERE full_text_search @@ to_tsquery(:lang, :ts_query) AND status <> :status_select
-        ORDER BY rank DESC
-        LIMIT 10
-    """)
+    yield f"3;{len(docs)} informasi relevan berhasil dikumpulkan, sedang mencari dokumen yang informasi kata kunci;null\n"
+    try:
+        ts_lang = 'indonesian'
+        stmt = text("""
+            SELECT document_id, page_number,
+            ts_rank_cd(full_text_search, to_tsquery(:lang, :ts_query)) AS rank
+            FROM legal_document_pages
+            WHERE full_text_search @@ to_tsquery(:lang, :ts_query) AND status <> :status_select
+            ORDER BY rank DESC
+            LIMIT 10
+        """)
 
-    res = db.execute(stmt, params={"lang": ts_lang, "ts_query": fts_query, "status_select": status_select})
-    for id, page_number, _ in res:
-        res = db.execute(text("""
-            SELECT * FROM public.legal_document_page_metadata_view
-            WHERE document_id = :id
-            AND page_number BETWEEN :min_page AND :max_page
-            AND status <> :status_select
-        """), params={
-            "id": id,
-            "min_page": page_number - 2,
-            "max_page": page_number + 2,
-            "status_select": status_select
-        })
 
-        for doc in res:
-            docs.append({
-                "document_id": doc[0],
-                "title": doc[1],
-                "jenis_bentuk_peraturan": doc[2],
-                "pemrakarsa": doc[3],
-                "nomor": doc[4],
-                "tahun": doc[5],
-                "tentang": doc[6],
-                "tempat_penetapan": doc[7],
-                "ditetapkan_tanggal": doc[8],
-                "pejabat_yang_menetapkan": doc[9],
-                "status": doc[10],
-                "url": doc[11],
-                "dasar_hukum": doc[12],
-                "mengubah": doc[13],
-                "diubah_oleh": doc[14],
-                "mencabut": doc[15],
-                "dicabut_oleh": doc[16],
-                "melaksanakan_amanat_peraturan": doc[17],
-                "dilaksanakan_oleh_peraturan_pelaksana": doc[18],
-                "page_number": doc[19],
-                "combined_body": doc[20],
+        res = db.execute(stmt, params={"lang": ts_lang, "ts_query": fts_query, "status_select": status_select})
+        for id, page_number, _ in res:
+            res = db.execute(text("""
+                SELECT * FROM public.legal_document_page_metadata_view
+                WHERE document_id = :id
+                AND page_number BETWEEN :min_page AND :max_page
+                AND status <> :status_select
+            """), params={
+                "id": id,
+                "min_page": page_number - 2,
+                "max_page": page_number + 2,
+                "status_select": status_select
             })
+
+            for doc in res:
+                docs.append({
+                    "document_id": doc[0],
+                    "title": doc[1],
+                    "jenis_bentuk_peraturan": doc[2],
+                    "pemrakarsa": doc[3],
+                    "nomor": doc[4],
+                    "tahun": doc[5],
+                    "tentang": doc[6],
+                    "tempat_penetapan": doc[7],
+                    "ditetapkan_tanggal": doc[8],
+                    "pejabat_yang_menetapkan": doc[9],
+                    "status": doc[10],
+                    "url": doc[11],
+                    "dasar_hukum": doc[12],
+                    "mengubah": doc[13],
+                    "diubah_oleh": doc[14],
+                    "mencabut": doc[15],
+                    "dicabut_oleh": doc[16],
+                    "melaksanakan_amanat_peraturan": doc[17],
+                    "dilaksanakan_oleh_peraturan_pelaksana": doc[18],
+                    "page_number": doc[19],
+                    "combined_body": doc[20],
+                })
+    except Exception as e:
+        print(e)
 
     yield f"4;{len(docs)} informasi relevan berhasil dikumpulkan, mengurutkan informasi berdasarkan relevansi...;null\n"
     # deduplicate based on document_id
