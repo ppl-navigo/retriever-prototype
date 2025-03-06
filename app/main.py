@@ -10,8 +10,8 @@ import ollama
 import os
 import json
 
-os.environ['HTTPS_PROXY'] = 'http://proxy.cs.ui.ac.id:8080'
-os.environ['https_proxy'] = 'http://proxy.cs.ui.ac.id:8080'
+# os.environ['HTTPS_PROXY'] = 'http://proxy.cs.ui.ac.id:8080'
+# os.environ['https_proxy'] = 'http://proxy.cs.ui.ac.id:8080'
 
 app = FastAPI()
 rerank_model = Ranker(model_name="ms-marco-TinyBERT-L-2-v2", cache_dir="./.cache", max_length=2000)
