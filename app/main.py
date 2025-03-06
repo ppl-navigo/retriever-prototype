@@ -64,6 +64,8 @@ def retrieval_generator(vsm_query: str, fts_query: str, berlaku_only: bool, tida
     else:
         status_select = "Semua"
     embedding_vector = client.embed(model="bge-m3", input=vsm_query).embeddings[0]
+    print(f"Query: {vsm_query}")
+    print(f"Embedding: {embedding_vector}")
     yield "0;Selesai memahami query, sedang mencari informasi relevan...;null\n"
     res: CursorResult = db.execute(text("""
     SELECT 
@@ -79,7 +81,6 @@ def retrieval_generator(vsm_query: str, fts_query: str, berlaku_only: bool, tida
     ORDER BY similarity DESC
     LIMIT 100;
     """), params={"query_embedding": embedding_vector, "status_select": status_select})
-
     data = []
     rows = res.fetchall()
     for i, row in enumerate(rows):
@@ -92,7 +93,7 @@ def retrieval_generator(vsm_query: str, fts_query: str, berlaku_only: bool, tida
             "doc_id": row[4]
         })
     yield f"1;Selesai menemukan informasi yang cocok, sedang mengurutkan relevansi informasi...;null\n"
-
+    print(f"Data: {len(data)}")
     rerank_request = RerankRequest(query=vsm_query, passages=data)
     result = rerank_model.rerank(rerank_request)[:20]
 
@@ -190,7 +191,7 @@ def retrieval_generator(vsm_query: str, fts_query: str, berlaku_only: bool, tida
                 })
     except Exception as e:
         print(e)
-
+    print(f"Data: {len(docs)}")
     yield f"4;{len(docs)} informasi relevan berhasil dikumpulkan, mengurutkan informasi berdasarkan relevansi...;null\n"
     # deduplicate based on document_id
     payload = []
@@ -211,6 +212,7 @@ def retrieval_generator(vsm_query: str, fts_query: str, berlaku_only: bool, tida
     result = rerank_model.rerank(rerank_request)
 
     yield f"done;Selesai mengumpulkan informasi, {len(docs)} informasi relevan ditemukan;{json.dumps(result, default=str)}\n"
+    print("done")
     yield "data: done\n\n"
     db.close()
 
