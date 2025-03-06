@@ -16,7 +16,7 @@ os.environ['https_proxy'] = ''
 os.environ['http_proxy'] = ''
 
 client = Client(
-  host='http://localhost:11434',
+  host='http://ollama:11434',
   headers={'x-some-header': 'some-value'}
 )
 
