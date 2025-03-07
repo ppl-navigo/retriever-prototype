@@ -16,7 +16,7 @@ os.environ['https_proxy'] = ''
 os.environ['http_proxy'] = ''
 
 client = Client(
-  host='http://ollama:11434',
+  host='http://localhost:11434',
   headers={'x-some-header': 'some-value'}
 )
 
@@ -68,6 +68,7 @@ def retrieval_generator(vsm_query: str, fts_query: str, berlaku_only: bool, tida
     embedding_vector = client.embed(model="bge-m3", input=vsm_query).embeddings[0]
     yield "0;Selesai memahami query, sedang mencari informasi relevan...;null\n"
     print(f"embedding finsihed in {time.time() - start} seconds")
+    start = time.time()
     res: CursorResult = db.execute(text("""
     SELECT chunk.page_number, chunk.legal_document_id,
     MAX((1 - (chunk.embedding <=> CAST(:query_embedding AS vector)))) AS similarity
@@ -131,6 +132,7 @@ def retrieval_generator(vsm_query: str, fts_query: str, berlaku_only: bool, tida
 
     yield f"3;{len(docs)} informasi relevan berhasil dikumpulkan, sedang mencari dokumen yang informasi kata kunci;null\n"
     print(f"another retrieval finsihed in {time.time() - start} seconds")
+    start = time.time()
     try:
         ts_lang = 'indonesian'
         stmt = text("""
@@ -186,6 +188,7 @@ def retrieval_generator(vsm_query: str, fts_query: str, berlaku_only: bool, tida
         print(e)
     yield f"4;{len(docs)} informasi relevan berhasil dikumpulkan, mengurutkan informasi berdasarkan relevansi...;null\n"
     print(f"fts done in {time.time() - start} seconds")
+    start = time.time()
     # deduplicate based on document_id
     payload = []
     ids = set()
